@@ -6,6 +6,9 @@ import math
 from pathlib import Path
 import matplotlib.pyplot as plt
 
+# Constants and hashing use the SplitMix64 algorithm to produce offline deterministic GT latency distributions
+# Link: https://rosettacode.org/wiki/Pseudo-random_numbers/Splitmix64#Go
+
 MASK64 = (1 << 64) - 1
 GOLDEN = 0x9E3779B97F4A7C15
 DEFAULT_PHASE_SCHEDULE = "0:70,20,8,2;5:64,23,10,3;8:20,20,20,30;9:64,23,10,3;14:70,20,8,2"
@@ -76,6 +79,7 @@ def phase_weights(elapsed_s, phase_schedule):
 
 
 def splitmix64(x):
+    """Source: next_int() function from https://rosettacode.org/wiki/Pseudo-random_numbers/Splitmix64#Python"""
     x = (x + GOLDEN) & MASK64
     x = ((x ^ (x >> 30)) * 0xBF58476D1CE4E5B9) & MASK64
     x = ((x ^ (x >> 27)) * 0x94D049BB133111EB) & MASK64
@@ -83,7 +87,9 @@ def splitmix64(x):
 
 
 def hash_unit(request_id, seed):
+    """TODO: needs to be verified!"""
     x = splitmix64((request_id ^ ((seed + GOLDEN) & MASK64)) & MASK64)
+    # make the result a float in [0, 1) by shifting down to 53 bits and dividing by 2^53
     return (x >> 11) / float(1 << 53)
 
 
