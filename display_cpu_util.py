@@ -1,10 +1,7 @@
-#!/usr/bin/env python3
 import argparse
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import pandas as pd
-
 
 def load_cpu(path):
     df = pd.read_csv(path)
@@ -12,12 +9,10 @@ def load_cpu(path):
     df["relative_time_s"] = df["timestamp_unix"] - start_time
     return df
 
-
 def load_workers(path):
     df = pd.read_csv(path)
     df["relative_time_s"] = df["elapsed_ms"] / 1000.0
     return df
-
 
 def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
     fig, ax_cpu = plt.subplots(figsize=(12, 6))
@@ -25,6 +20,7 @@ def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
 
     core_cols = [f"core_{i}" for i in range(8) if f"core_{i}" in cpu_df.columns]
     colormap = plt.colormaps.get_cmap("tab10")
+    # plotting the CPU utilization for each core
     for i, core in enumerate(core_cols):
         ax_cpu.plot(
             cpu_df["relative_time_s"],
@@ -35,6 +31,7 @@ def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
             color=colormap(i),
         )
 
+    # plotting the workers used over time
     ax_workers.step(
         workers_df["relative_time_s"],
         workers_df["workers_used"],
@@ -62,26 +59,27 @@ def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
     fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot CPU utilization and Vegeta worker growth for one run.")
-    parser.add_argument("--experiments-dir", type=Path, default=Path("experiments_phase_queued_sut"))
+    parser.add_argument("--experiments-dir", type=Path, default=Path("phase-smooth-data/experiments_phase_queued_sut"))
     parser.add_argument("--rps", type=int, default=15000)
     parser.add_argument("--run", type=int, default=1)
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args()
 
+    # loading the CSV files
     run_dir = args.experiments_dir / f"rps_{args.rps}" / f"run_{args.run}"
     cpu_csv = run_dir / "cpu_utilization.csv"
     workers_csv = run_dir / "workers_timeline.csv"
 
+    # loading the dataframes
     cpu_df = load_cpu(cpu_csv)
     workers_df = load_workers(workers_csv)
 
+    print(cpu_df.head())
+    print(workers_df.head())
+
+    # plotting the data
     output = args.output or Path("results") / f"rps_{args.rps}" / f"run_{args.run}_cpu_workers.png"
     plot_cpu_and_workers(cpu_df, workers_df, output, args.rps, args.run)
     print(f"wrote plot: {output}")
-
-
-if __name__ == "__main__":
-    main()
