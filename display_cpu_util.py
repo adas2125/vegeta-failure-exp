@@ -1,80 +1,85 @@
+import argparse
 from pathlib import Path
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
 
-# User-defined arguments; may need to be adjusted based on your experiment setup
-EXPERIMENTS_DIR = Path('experiments')
-RESULTS_DIR = Path('results')
-RPS = 5000
-RUNS = 3
+def load_cpu(path):
+    df = pd.read_csv(path)
+    start_time = df["timestamp_unix"].min()
+    df["relative_time_s"] = df["timestamp_unix"] - start_time
+    return df
 
-for run in range(1, RUNS + 1):
-    # Load the data
-    cpu_csv = EXPERIMENTS_DIR / f'rps_{RPS}/run_{run}/cpu_utilization.csv'
-    memory_csv = EXPERIMENTS_DIR / f'rps_{RPS}/run_{run}/memory_utilization.csv'
-    df = pd.read_csv(cpu_csv)
+def load_workers(path):
+    df = pd.read_csv(path)
+    df["relative_time_s"] = df["elapsed_ms"] / 1000.0
+    return df
 
-    # Convert Unix timestamps to relative seconds (starting at T=0)
-    start_time = df['timestamp_unix'].min()
-    df['relative_time_s'] = df['timestamp_unix'] - start_time
+def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
+    fig, ax_cpu = plt.subplots(figsize=(12, 6))
+    ax_workers = ax_cpu.twinx()
 
-    # Identify only the first 8 core columns
-    core_cols = [f'core_{i}' for i in range(8) if f'core_{i}' in df.columns]
-
-    memory_df = pd.read_csv(memory_csv) if memory_csv.exists() else None
-    if memory_df is not None:
-        memory_df['relative_time_s'] = memory_df['timestamp_unix'] - start_time
-
-    subplot_count = 2 if memory_df is not None else 1
-    fig, axes = plt.subplots(subplot_count, 1, figsize=(12, 8), sharex=True)
-    if subplot_count == 1:
-        axes = [axes]
-    ax_cpu = axes[0]
-
-    # --- Per-Core CPU ---
-    # We loop through and plot each core.
-    # Using a colormap ensures we get distinct colors for up to 8-16 cores.
-    colormap = plt.cm.get_cmap('tab10', len(core_cols))
-
+    core_cols = [f"core_{i}" for i in range(8) if f"core_{i}" in cpu_df.columns]
+    colormap = plt.colormaps.get_cmap("tab10")
+    # plotting the CPU utilization for each core
     for i, core in enumerate(core_cols):
         ax_cpu.plot(
-            df['relative_time_s'],
-            df[core],
+            cpu_df["relative_time_s"],
+            cpu_df[core],
             label=f"Core {core.split('_')[1]}",
-            alpha=0.7,
-            linewidth=1.5,
-            color=colormap(i)
+            alpha=0.55,
+            linewidth=1.1,
+            color=colormap(i),
         )
 
-    ax_cpu.set_ylabel('Per-Core CPU %')
+    # plotting the workers used over time
+    ax_workers.step(
+        workers_df["relative_time_s"],
+        workers_df["workers_used"],
+        where="post",
+        linewidth=3.0,
+        color="black",
+        linestyle="--",
+        label="Workers used",
+        zorder=10,
+    )
+
+    ax_cpu.set_title(f"CPU Utilization and Worker Growth - {rps} RPS Run {run}")
+    ax_cpu.set_xlabel("Time (s)")
+    ax_cpu.set_ylabel("Per-core CPU %")
+    ax_workers.set_ylabel("Workers used")
     ax_cpu.set_ylim(0, 105)
-    ax_cpu.grid(True, linestyle='--', alpha=0.7)
-    ax_cpu.legend(loc='upper left', bbox_to_anchor=(1.01, 1), borderaxespad=0.)
+    ax_cpu.grid(True, linestyle="--", alpha=0.6)
 
-    if memory_df is not None:
-        ax_mem = axes[1]
-        ax_mem.plot(
-            memory_df['relative_time_s'],
-            memory_df['rss_mb'],
-            label='RSS MB',
-            linewidth=1.8,
-            color='tab:blue'
-        )
-        ax_mem.plot(
-            memory_df['relative_time_s'],
-            memory_df['vms_mb'],
-            label='VMS MB',
-            linewidth=1.8,
-            color='tab:orange'
-        )
-        ax_mem.set_ylabel('Memory MB')
-        ax_mem.grid(True, linestyle='--', alpha=0.7)
-        ax_mem.legend(loc='upper left', bbox_to_anchor=(1.01, 1), borderaxespad=0.)
+    cpu_lines, cpu_labels = ax_cpu.get_legend_handles_labels()
+    worker_lines, worker_labels = ax_workers.get_legend_handles_labels()
+    ax_cpu.legend(cpu_lines + worker_lines, cpu_labels + worker_labels, loc="upper left", fontsize=8)
 
-    axes[-1].set_xlabel('Time (Seconds)')
-    plt.tight_layout()
-
-    # save the figure
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(RESULTS_DIR / f'cpu_utilization_plot_run_{run}.png', dpi=300, bbox_inches='tight')
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Plot CPU utilization and Vegeta worker growth for one run.")
+    parser.add_argument("--experiments-dir", type=Path, default=Path("phase-smooth-data/experiments_phase_queued_sut"))
+    parser.add_argument("--rps", type=int, default=15000)
+    parser.add_argument("--run", type=int, default=1)
+    parser.add_argument("--output", type=Path, default=None)
+    args = parser.parse_args()
+
+    # loading the CSV files
+    run_dir = args.experiments_dir / f"rps_{args.rps}" / f"run_{args.run}"
+    cpu_csv = run_dir / "cpu_utilization.csv"
+    workers_csv = run_dir / "workers_timeline.csv"
+
+    # loading the dataframes
+    cpu_df = load_cpu(cpu_csv)
+    workers_df = load_workers(workers_csv)
+
+    print(cpu_df.head())
+    print(workers_df.head())
+
+    # plotting the data
+    output = args.output or Path("results") / f"rps_{args.rps}" / f"run_{args.run}_cpu_workers.png"
+    plot_cpu_and_workers(cpu_df, workers_df, output, args.rps, args.run)
+    print(f"wrote plot: {output}")
