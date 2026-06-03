@@ -29,7 +29,7 @@ type logEntry struct {
 func main() {
 	addr        := flag.String("addr",        "0.0.0.0:8080", "listen address")
 	delay       := flag.Duration("delay",     10*time.Second, "fixed processing delay per request")
-	concurrency := flag.Int("concurrency",    50,             "max concurrent requests (server-side worker slots)")
+	concurrency := flag.Int("concurrency",    0,             "max concurrent requests (0 = unlimited)")
 	logPath     := flag.String("log",         "server_arrivals.jsonl", "path to per-request JSONL log")
 	flag.Parse()
 
@@ -42,8 +42,11 @@ func main() {
 	var logMu sync.Mutex
 	enc := json.NewEncoder(lf)
 
-	// worker slots — limits in-flight processing on the server side
-	slots := make(chan struct{}, *concurrency)
+	// worker slots — nil means unlimited concurrency
+	var slots chan struct{}
+	if *concurrency > 0 {
+		slots = make(chan struct{}, *concurrency)
+	}
 
 	// server start time for relative timestamps
 	serverStart := time.Now()
@@ -56,8 +59,10 @@ func main() {
 		arrivedAt := time.Now()
 		id := atomic.AddUint64(&reqCounter, 1)
 
-		// acquire a worker slot (blocks if server is at concurrency limit)
-		slots <- struct{}{}
+		// acquire a worker slot if concurrency is limited
+		if slots != nil {
+			slots <- struct{}{}
+		}
 		admittedAt := time.Now()
 
 		// fixed processing delay
@@ -65,7 +70,9 @@ func main() {
 		completedAt := time.Now()
 
 		// release slot
-		<-slots
+		if slots != nil {
+			<-slots
+		}
 
 		// compute timings
 		entry := logEntry{
@@ -98,7 +105,11 @@ func main() {
 		Handler: h2cHandler,
 	}
 
-	log.Printf("h2 delay server | addr=%s delay=%s concurrency=%d log=%s",
-		*addr, *delay, *concurrency, *logPath)
+	concurrencyStr := "unlimited"
+	if *concurrency > 0 {
+		concurrencyStr = fmt.Sprintf("%d", *concurrency)
+	}
+	log.Printf("h2 delay server | addr=%s delay=%s concurrency=%s log=%s",
+		*addr, *delay, concurrencyStr, *logPath)
 	log.Fatal(srv.ListenAndServe())
 }

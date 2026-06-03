@@ -22,8 +22,8 @@ import matplotlib.ticker as ticker
 import numpy as np
 
 
-def load_arrivals(path: str) -> np.ndarray:
-    """Return sorted array of arrived_at_s values from a JSONL log."""
+def load_arrivals(path: str, field: str = "arrived_at_s") -> np.ndarray:
+    """Return sorted array of <field> values from a JSONL log."""
     times = []
     with open(path) as f:
         for line in f:
@@ -32,27 +32,40 @@ def load_arrivals(path: str) -> np.ndarray:
                 continue
             try:
                 obj = json.loads(line)
-                times.append(obj["arrived_at_s"])
+                times.append(obj[field])
             except (json.JSONDecodeError, KeyError):
                 continue
     if not times:
-        raise ValueError(f"No valid entries found in {path}")
+        raise ValueError(f"No valid entries with field '{field}' found in {path}")
     arr = np.array(times, dtype=float)
-    # shift so t=0 is the first arrival in this run
+    # shift so t=0 is the first event in this run
     arr -= arr.min()
     return np.sort(arr)
 
 
-def cumulative_series(arrival_times: np.ndarray, bin_width: float = 1.0):
+def cumulative_series(arrival_times: np.ndarray, bin_width: float):
     """
-    Returns (bin_centres, cumulative_counts) at bin_width-second resolution.
+    Returns (bin_right_edges, cumulative_counts) at bin_width resolution.
     """
     t_max = arrival_times.max()
     bins = np.arange(0, t_max + bin_width, bin_width)
+    if len(bins) < 2:
+        bins = np.array([0.0, t_max + bin_width])
     counts, edges = np.histogram(arrival_times, bins=bins)
     cumulative = np.cumsum(counts)
-    centres = edges[1:]          # right edge of each bin = end of that second
+    centres = edges[1:]          # right edge of each bin
     return centres, cumulative
+
+
+def choose_bin_width(span_s: float, target_bins: int = 50) -> float:
+    """Pick a bin width that yields ~target_bins bins for the given span."""
+    raw = span_s / target_bins
+    # round to a nice number
+    for nice in [0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005,
+                 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0]:
+        if raw <= nice:
+            return nice
+    return raw
 
 
 def main():
@@ -63,8 +76,11 @@ def main():
         help="One entry per run, format  STREAMS:path/to/file.jsonl"
     )
     parser.add_argument("--out", default="arrivals.png", help="Output image path")
-    parser.add_argument("--bin-width", type=float, default=1.0,
-                        help="Time bin width in seconds (default 1)")
+    parser.add_argument("--bin-width", type=float, default=None,
+                        help="Time bin width in seconds (default: auto-selected from data span)")
+    parser.add_argument("--field", default="arrived_at_s",
+                        choices=["arrived_at_s", "admitted_at_s", "completed_at_s"],
+                        help="Timestamp field to plot (default: arrived_at_s)")
     parser.add_argument("--title", default=None, help="Override plot title")
     args = parser.parse_args()
 
@@ -91,31 +107,59 @@ def main():
     # colour cycle matching the reference figure
     colours = ["blue", "green", "purple", "black", "red", "orange"]
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-
-    for i, (streams, path) in enumerate(runs):
-        print(f"Loading {path}  (streams={streams}) ...", file=sys.stderr)
+    # collect all arrival arrays first so we can pick a shared bin_width
+    all_arrivals = []
+    for streams, path in runs:
+        print(f"Loading {path}  (streams={streams}, field={args.field}) ...", file=sys.stderr)
         try:
-            arrivals = load_arrivals(path)
+            all_arrivals.append((streams, path, load_arrivals(path, field=args.field)))
         except Exception as e:
             print(f"  SKIP: {e}", file=sys.stderr)
-            continue
+            all_arrivals.append((streams, path, None))
 
-        centres, cumulative = cumulative_series(arrivals, bin_width=args.bin_width)
+    # auto-select bin_width from the widest span if user didn't override
+    if args.bin_width is None:
+        spans = [a.max() for _, _, a in all_arrivals if a is not None]
+        max_span = max(spans) if spans else 1.0
+        bin_width = choose_bin_width(max_span)
+    else:
+        bin_width = args.bin_width
+
+    # if all data fits within 1 second, show x-axis in milliseconds
+    use_ms = (max(a.max() for _, _, a in all_arrivals if a is not None) < 1.0)
+    scale = 1000.0 if use_ms else 1.0
+    x_label = "Timestamp (ms)" if use_ms else "Timestamp (s)"
+
+    print(f"bin_width={bin_width:.4f}s  x_unit={'ms' if use_ms else 's'}", file=sys.stderr)
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+
+    for i, (streams, path, arrivals) in enumerate(all_arrivals):
+        if arrivals is None:
+            continue
+        centres, cumulative = cumulative_series(arrivals, bin_width=bin_width)
         colour = colours[i % len(colours)]
-        ax.plot(centres, cumulative,
+        event_word = {"arrived_at_s": "arrived", "admitted_at_s": "admitted",
+                      "completed_at_s": "completed"}.get(args.field, args.field)
+        ax.plot(centres * scale, cumulative,
                 color=colour,
                 linewidth=1.8,
-                label=f"Total requests arrived ({streams} Streams)")
+                label=f"Total requests {event_word} ({streams} Streams)")
 
-    # formatting to match Figure 4.16
-    ax.set_xlabel("Timestamp (s)", fontsize=12)
-    ax.set_ylabel("Total Number of Requests Arrived", fontsize=12)
+    ax.set_xlabel(x_label, fontsize=12)
+    event_word = {"arrived_at_s": "Arrived", "admitted_at_s": "Admitted",
+                  "completed_at_s": "Completed"}.get(args.field, args.field)
+    ax.set_ylabel(f"Total Number of Requests {event_word}", fontsize=12)
 
-    title = args.title or (
-        "Number of Requests Arrived When h2load Attempts to Send N RPS\n"
-        "to Server with 10s Delay (varying stream counts)"
-    )
+    default_titles = {
+        "arrived_at_s": ("Number of Requests Arrived When h2load Attempts to Send N RPS\n"
+                         "to Server with 10s Delay (varying stream counts)"),
+        "admitted_at_s": ("Number of Requests Admitted (Given Worker Slot) Over Time\n"
+                          "h2load vs Server with 10s Delay (varying stream counts)"),
+        "completed_at_s": ("Number of Requests Completed Over Time\n"
+                           "h2load vs Server with 10s Delay (varying stream counts)"),
+    }
+    title = args.title or default_titles.get(args.field, f"Cumulative {args.field} over time")
     ax.set_title(title, fontsize=12)
 
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{int(x):,}"))
