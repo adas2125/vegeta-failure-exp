@@ -74,9 +74,10 @@ if __name__ == "__main__":
     parser.add_argument("--runs", type=int, default=1, help="number of run_N directories to read")
     parser.add_argument("--experiments-dir", type=Path, default=Path("phase-smooth-data/experiments_phase_queued_sut"))
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--cpu-set", type=str, required=True, help="CPU set label to include in plot title")
     args = parser.parse_args()
 
-    exp_base = args.experiments_dir / f"rps_{args.rps}"
+    exp_base = args.experiments_dir / f"rps_{args.rps}_{args.cpu_set}"
     run_rates = []
 
     # loading the results.csv for each run and calculating the send rate
@@ -86,7 +87,7 @@ if __name__ == "__main__":
         # adding tuple of (run number, send rate DataFrame) to the list
         run_rates.append((run, load_send_rate(results_csv)))
 
-    output = args.output or Path("results") / f"rps_{args.rps}" / "send_rate_1s_all_runs.png"
+    output = args.output or Path("results") / f"rps_{args.rps}_{args.cpu_set}" / "send_rate_1s_all_runs.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     plot_send_rates(run_rates, output, args.rps)
     print(f"wrote plot: {output}")

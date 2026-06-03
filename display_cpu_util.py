@@ -65,10 +65,11 @@ if __name__ == "__main__":
     parser.add_argument("--rps", type=int, default=15000)
     parser.add_argument("--run", type=int, default=1)
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--cpu-set", type=str, required=True, help="CPU set label to include in plot title")
     args = parser.parse_args()
 
     # loading the CSV files
-    run_dir = args.experiments_dir / f"rps_{args.rps}" / f"run_{args.run}"
+    run_dir = args.experiments_dir / f"rps_{args.rps}_{args.cpu_set}" / f"run_{args.run}"
     cpu_csv = run_dir / "cpu_utilization.csv"
     workers_csv = run_dir / "workers_timeline.csv"
 
@@ -80,6 +81,6 @@ if __name__ == "__main__":
     print(workers_df.head())
 
     # plotting the data
-    output = args.output or Path("results") / f"rps_{args.rps}" / f"run_{args.run}_cpu_workers.png"
+    output = args.output or Path("results") / f"rps_{args.rps}_{args.cpu_set}" / f"run_{args.run}_cpu_workers.png"
     plot_cpu_and_workers(cpu_df, workers_df, output, args.rps, args.run)
     print(f"wrote plot: {output}")

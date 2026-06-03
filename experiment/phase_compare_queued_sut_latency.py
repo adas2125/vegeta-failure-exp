@@ -187,11 +187,11 @@ def print_summary(truth_values, run_values, statuses, truth_seed):
         run = percentile(run_values, pct)
         print(f"p{pct * 100:<9g} {truth:12.3f} {run:12.3f} {run - truth:12.3f}")
 
-def default_output_path(rps, runs, filename):
+def default_output_path(rps, runs, cpu_set, filename):
     return (
         Path("results")
         / "phase_queued_sut_comparison"
-        / f"rps_{filename_number(rps)}"
+        / f"rps_{filename_number(rps)}_{cpu_set}"
         / f"runs_1_to_{runs}"
         / filename
     )
@@ -221,6 +221,7 @@ if __name__ == "__main__":
     parser.add_argument("--phase-schedule", type=parse_phase_schedule, default=parse_phase_schedule(DEFAULT_PHASE_SCHEDULE))
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--hdr-output", type=Path, default=None)
+    parser.add_argument("--cpu-set", type=str, required=True, help="CPU set label to include in plot title")
     parser.add_argument("--runs", type=int, default=1, help="number of runs to compare (default: 1)")
     args = parser.parse_args()
 
@@ -256,7 +257,7 @@ if __name__ == "__main__":
         print_summary(truth_values, run_values, statuses, truth_seed)
 
     # create the output directories if they don't exist
-    output = args.output or default_output_path(args.rps, args.runs, "latency_distribution_comparison.png")
+    output = args.output or default_output_path(args.rps, args.runs, args.cpu_set, "latency_distribution_comparison.png")
     hdr_output = args.hdr_output or default_hdr_output_path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     hdr_output.parent.mkdir(parents=True, exist_ok=True)
