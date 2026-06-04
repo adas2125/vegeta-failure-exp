@@ -8,6 +8,14 @@ The goal is to show that, with default Vegeta settings, the load generator (LG)
 can silently fail to deliver the expected load distribution to the SUT. This can
 lead to issues such as coordinated omission.
 
+### Some Important Notes
+
+This repository includes the files `attack.go` and `lib/attack.go`. Assuming 
+you have already cloned Vegeta, replace the original files with the same name
+by these new ones to ensure that everything runs smoothly. Additionally, I have
+also included a setup script `setup_vegeta.sh`. Copy this over to the
+local copy of Vegeta and run it as well.
+
 #### 12K Vegeta Attack Against a Limited-Concurrency CPU on a Large Node
 
 This case simulates a larger node by increasing CPU access with `taskset`.
