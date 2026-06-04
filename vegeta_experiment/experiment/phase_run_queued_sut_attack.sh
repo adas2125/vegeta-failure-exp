@@ -9,7 +9,7 @@ TIMEOUT="${TIMEOUT:-60s}"
 NAME="${NAME:-phase-queued-sut-${RATE}-${DURATION}}"
 HIST_BUCKETS="${HIST_BUCKETS:-[0,5ms,10ms,15ms,25ms,50ms,100ms,200ms,300ms,350ms,400ms,450ms,500ms,750ms,1s,2s,5s,10s,30s]}"
 VEGETA_CPUSET="${VEGETA_CPUSET:-0-7}"
-RUN_IDS="${RUN_IDS:-1 2 3}"
+RUN_IDS="${RUN_IDS:-1 2 3 4 5}"
 TARGET_HOST="${TARGET_HOST:-130.127.133.121}"
 BASE_PORT="${BASE_PORT:-8079}"
 EXPERIMENTS_DIR="${EXPERIMENTS_DIR:-experiments_phase_queued_sut}"
@@ -23,7 +23,7 @@ TARGET_WRITER="$ROOT_DIR/scripts/experiment/utils/write_targets.py"
 # each run directed to a different port to avoid conflicts
 for RUN_ID in $RUN_IDS; do
   PORT=$((BASE_PORT + RUN_ID))
-  EXP_DIR="${ROOT_DIR}/${EXPERIMENTS_DIR}/rps_${RPS}/run_${RUN_ID}"
+  EXP_DIR="${ROOT_DIR}/${EXPERIMENTS_DIR}/rps_${RPS}_${VEGETA_CPUSET}/run_${RUN_ID}"
   TARGET_URL="http://${TARGET_HOST}:${PORT}/"
   mkdir -p "$EXP_DIR"
 
