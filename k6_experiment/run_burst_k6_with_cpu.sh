@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # Adjusted: Split into HOST and PORT for dynamic URL generation
 export TARGET_HOST="${TARGET_HOST:-https://130.127.133.121}"
 export START_PORT="${START_PORT:-8080}"
-export RATE="${RATE:-4000}"
+export RATE="${RATE:-3000}"
 export DURATION="${DURATION:-60s}"
 export PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-25000}"
 export MAX_VUS="${MAX_VUS:-1000000}"
