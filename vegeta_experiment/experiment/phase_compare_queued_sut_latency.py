@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import math
 from pathlib import Path
 import matplotlib.pyplot as plt
 
@@ -119,35 +120,55 @@ def write_plot(path, truth_values_by_name, run_values_by_name, hdr_points_by_nam
     fig.savefig(path, dpi=300)
     plt.close(fig)
 
-def write_hdr_plot(path, truth_values_by_name, hdr_points_by_name, rps, concurrency):
-    fig, axes = plt.subplots(3, 1, figsize=(11, 13), sharex=True, sharey=True)
-    truth_ax, measured_ax, combined_ax = axes
+def write_hdr_plot(path, truth_values_by_name, hdr_points_by_name, rps, concurrency, combined_only=True):
+    if combined_only:
+        fig, ax = plt.subplots(figsize=(11, 6))
+        for (truth_name, truth_values), (_, hdr_points) in zip(truth_values_by_name, hdr_points_by_name):
+            percentiles = [pct for pct, _, _ in hdr_points]
+            x = [one_by for _, _, one_by in hdr_points]
+            ax.plot(x, percentile_curve(truth_values, percentiles), linewidth=2.2, linestyle="--", label=truth_name)
 
-    for (truth_name, truth_values), (_, hdr_points) in zip(truth_values_by_name, hdr_points_by_name):
-        percentiles = [pct for pct, _, _ in hdr_points]
-        x = [one_by for _, _, one_by in hdr_points]
-        truth_ax.plot(x, percentile_curve(truth_values, percentiles), linewidth=2.2, linestyle="--", label=truth_name)
-        combined_ax.plot(x, percentile_curve(truth_values, percentiles), linewidth=2.2, linestyle="--", label=truth_name)
+        for hdr_name, hdr_points in hdr_points_by_name:
+            x = [one_by for _, _, one_by in hdr_points]
+            y = [latency_ms for _, latency_ms, _ in hdr_points]
+            ax.plot(x, y, linewidth=2.0, label=hdr_name)
 
-    for hdr_name, hdr_points in hdr_points_by_name:
-        x = [one_by for _, _, one_by in hdr_points]
-        y = [latency_ms for _, latency_ms, _ in hdr_points]
-
-        # plotting the measured HDR points on the measured_ax and combined_ax with solid lines
-        measured_ax.plot(x, y, linewidth=2.0, label=hdr_name)
-        combined_ax.plot(x, y, linewidth=2.0, label=hdr_name)
-
-    fig.suptitle(f"Phase Queued SUT HDR Latency Plot - {rps:g} RPS, C={concurrency}")
-    for ax, title in zip(axes, ["Ideal Ground Truth", "Measured Vegeta HDR", "Combined"]):
-        ax.set_title(title)
+        ax.set_title(f"Phase Queued SUT HDR Latency Plot - {rps:g} RPS, C={concurrency}")
         ax.set_ylabel("Latency (ms)")
         format_latency_axis(ax)
-    axes[-1].set_xlabel("Percentile")
-    fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(path, dpi=300)
-    plt.close(fig)
+        ax.set_xlabel("Percentile")
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+    else:
+        fig, axes = plt.subplots(3, 1, figsize=(11, 13), sharex=True, sharey=True)
+        truth_ax, measured_ax, combined_ax = axes
 
-def write_hdrplot_hdr_and_original(path, run_values_by_name, hdr_points_by_name, rps, concurrency):
+        for (truth_name, truth_values), (_, hdr_points) in zip(truth_values_by_name, hdr_points_by_name):
+            percentiles = [pct for pct, _, _ in hdr_points]
+            x = [one_by for _, _, one_by in hdr_points]
+            truth_ax.plot(x, percentile_curve(truth_values, percentiles), linewidth=2.2, linestyle="--", label=truth_name)
+            combined_ax.plot(x, percentile_curve(truth_values, percentiles), linewidth=2.2, linestyle="--", label=truth_name)
+
+        for hdr_name, hdr_points in hdr_points_by_name:
+            x = [one_by for _, _, one_by in hdr_points]
+            y = [latency_ms for _, latency_ms, _ in hdr_points]
+
+            # plotting the measured HDR points on the measured_ax and combined_ax with solid lines
+            measured_ax.plot(x, y, linewidth=2.0, label=hdr_name)
+            combined_ax.plot(x, y, linewidth=2.0, label=hdr_name)
+
+        fig.suptitle(f"Phase Queued SUT HDR Latency Plot - {rps:g} RPS, C={concurrency}")
+        for ax, title in zip(axes, ["Ideal Ground Truth", "Measured Vegeta HDR", "Combined"]):
+            ax.set_title(title)
+            ax.set_ylabel("Latency (ms)")
+            format_latency_axis(ax)
+        axes[-1].set_xlabel("Percentile")
+        fig.tight_layout(rect=[0, 0, 1, 0.97])
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+
+def write_hdrplot_hdr_and_original(path, run_values_by_name, hdr_points_by_name, rps, concurrency, combined_only=False):
     fig, axes = plt.subplots(3, 1, figsize=(11, 9), sharex=True, sharey=True)
 
     # plotting the measured HDR points on the first axis
@@ -166,12 +187,21 @@ def write_hdrplot_hdr_and_original(path, run_values_by_name, hdr_points_by_name,
         original_ax.plot(x, y, linewidth=2.0, label=run_name)
         combined_ax.plot(x, y, linewidth=2.0, label=run_name)
     
+    if combined_only:
+        print("Only showing combined HDR vs Original plot")
+        axes[0].remove()
+        axes[1].remove()
+        combined_ax.set_title("Measured Vegeta HDR vs Original Latency Plot")
     fig.suptitle(f"Phase Queued SUT HDR vs Original Latency Plot - {rps:g} RPS, C={concurrency}")
-    for ax, title in zip(axes, ["Measured Vegeta HDR", "Measured Original"]):
+    if combined_only:
+        axes_to_format = [combined_ax]
+    else:
+        axes_to_format = axes
+    for ax, title in zip(axes_to_format, ["Measured Vegeta HDR", "Measured Original", "Combined"]):
         ax.set_title(title)
         ax.set_ylabel("Latency (ms)")
         format_latency_axis(ax)
-    axes[-1].set_xlabel("Percentile")
+    axes_to_format[-1].set_xlabel("Percentile")
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     fig.savefig(path, dpi=300)
     plt.close(fig)
@@ -182,10 +212,47 @@ def print_summary(truth_values, run_values, statuses, truth_seed):
     print(f"statuses={statuses}")
     print(f"samples={len(run_values)}")
     print(f"{'percentile':>10} {'truth_ms':>12} {'run_ms':>12} {'run-truth':>12}")
+
+    run_pcts = {}
+    truth_pcts = {}
     for pct in SUMMARY_PERCENTILES:
         truth = percentile(truth_values, pct)
         run = percentile(run_values, pct)
+        run_pcts[pct] = run
+        truth_pcts[pct] = truth
         print(f"p{pct * 100:<9g} {truth:12.3f} {run:12.3f} {run - truth:12.3f}")
+    
+    return run_pcts, truth_pcts
+
+
+def mean_stddev(values):
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return mean, math.sqrt(variance)
+
+
+def print_all_runs_summary(all_run_pcts, all_truth_pcts):
+    runs = sorted(all_truth_pcts)
+    print(f"\nSummary of percentiles across all runs ({len(runs)} runs):")
+    print(
+        f"{'percentile':>10} {'truth_mean':>12} {'truth_std':>12} "
+        f"{'run_mean':>12} {'run_std':>12} {'diff_mean':>12} {'diff_std':>12}"
+    )
+
+    for pct in SUMMARY_PERCENTILES:
+        truth_values = [all_truth_pcts[run][pct] for run in runs]
+        run_values = [all_run_pcts[run][pct] for run in runs]
+        diff_values = [all_run_pcts[run][pct] - all_truth_pcts[run][pct] for run in runs]
+
+        truth_mean, truth_stddev = mean_stddev(truth_values)
+        run_mean, run_stddev = mean_stddev(run_values)
+        diff_mean, diff_stddev = mean_stddev(diff_values)
+
+        print(
+            f"p{pct * 100:<9g} {truth_mean:12.3f} {truth_stddev:12.3f} "
+            f"{run_mean:12.3f} {run_stddev:12.3f} {diff_mean:12.3f} {diff_stddev:12.3f}"
+        )
+
 
 def default_output_path(rps, runs, cpu_set, filename):
     return (
@@ -230,6 +297,8 @@ if __name__ == "__main__":
     truth_values_by_name = []
     run_values_by_name = []
     hdr_points_by_name = []
+
+    all_run_pcts, all_truth_pcts = {}, {}
     for run in range(1, args.runs + 1):
         print(f"run {run}/{args.runs}")
 
@@ -254,7 +323,11 @@ if __name__ == "__main__":
         # obtain the HDR plot points from the Vegeta hdrplot.tsv file in the same directory as results.csv
         hdrplot_tsv = results_csv.with_name("hdrplot.tsv")
         hdr_points_by_name.append((f"Run {run} Vegeta HDR latency", load_hdrplot_points(hdrplot_tsv)))
-        print_summary(truth_values, run_values, statuses, truth_seed)
+        run_pcts, truth_pcts = print_summary(truth_values, run_values, statuses, truth_seed)
+        all_run_pcts[run] = run_pcts
+        all_truth_pcts[run] = truth_pcts
+
+    print_all_runs_summary(all_run_pcts, all_truth_pcts)
 
     # create the output directories if they don't exist
     output = args.output or default_output_path(args.rps, args.runs, args.cpu_set, "latency_distribution_comparison.png")
@@ -266,12 +339,7 @@ if __name__ == "__main__":
 
     # plot the measured and truth latency distributions, saving to the output path
     write_plot(output, truth_values_by_name, run_values_by_name, hdr_points_by_name, args.rps, args.concurrency)
-    print(f"wrote plot: {output}")
-
     # plot the measured and truth latency distributions using the HDR points, saving to the hdr_output path
     write_hdr_plot(hdr_output, truth_values_by_name, hdr_points_by_name, args.rps, args.concurrency)
-    print(f"wrote HDR plot: {hdr_output}")
-
     # plot the measured HDR points and the original measured points, saving to the hdr_original_output path
     write_hdrplot_hdr_and_original(hdr_original_output, run_values_by_name, hdr_points_by_name, args.rps, args.concurrency)
-    print(f"wrote HDR vs original plot: {hdr_original_output}")
