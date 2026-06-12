@@ -17,7 +17,7 @@ DELAY_3="${DELAY_3:-100ms}"
 DELAY_4="${DELAY_4:-4s}"
 
 # Wall-time phase schedule: start_second:w1,w2,w3,w4
-PHASE_SCHEDULE="${PHASE_SCHEDULE:-0:100,0,0,0;27:0,100,0,0;30:100,0,0,0}"
+PHASE_SCHEDULE="${PHASE_SCHEDULE:-0:100,0,0,0;29:0,100,0,0;31:100,0,0,0}"
 
 # creating output directory and building the server binary
 mkdir -p "$EXP_DIR"
