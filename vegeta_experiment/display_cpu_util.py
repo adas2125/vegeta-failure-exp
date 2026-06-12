@@ -15,52 +15,81 @@ def load_workers(path):
     return df
 
 def plot_cpu_and_workers(cpu_df, workers_df, output_path, rps, run):
-    fig, ax_cpu = plt.subplots(figsize=(12, 6))
+    # ACM Paper Styling Requirements
+    plt.rcParams.update({
+        'font.size': 10,
+        'axes.labelsize': 10,
+        'xtick.labelsize': 9,
+        'ytick.labelsize': 9,
+        'legend.fontsize': 9,
+        'font.family': 'serif',
+        'pdf.fonttype': 42, # Forces Type 1 fonts (Required by ACM)
+        'ps.fonttype': 42
+    })
+
+    # 3.33 inches is the exact width of a single column in the ACM sigconf template
+    fig, ax_cpu = plt.subplots(figsize=(3.33, 2.3))
     ax_workers = ax_cpu.twinx()
 
     core_cols = [f"core_{i}" for i in range(8) if f"core_{i}" in cpu_df.columns]
-    colormap = plt.colormaps.get_cmap("tab10")
-    # plotting the CPU utilization for each core
-    for i, core in enumerate(core_cols):
-        ax_cpu.plot(
-            cpu_df["relative_time_s"],
-            cpu_df[core],
-            label=f"Core {core.split('_')[1]}",
-            alpha=0.55,
-            linewidth=1.1,
-            color=colormap(i),
-        )
+    
+    # Calculate the average across all selected cores
+    cpu_df["avg_cpu"] = cpu_df[core_cols].mean(axis=1)
 
-    # plotting the workers used over time
+    ax_cpu.plot(
+        cpu_df["relative_time_s"],
+        cpu_df["avg_cpu"],
+        label="Avg CPU",
+        linewidth=1.5,
+        color="#1f77b4", 
+    )
+
     ax_workers.step(
         workers_df["relative_time_s"],
         workers_df["workers_used"],
         where="post",
-        linewidth=3.0,
-        color="black",
+        linewidth=1.5,
+        color="#d62728", 
         linestyle="--",
-        label="Workers used",
-        zorder=10,
+        label="Workers",
     )
-
-    ax_cpu.set_title(f"CPU Utilization and Worker Growth - {rps} RPS Run {run}")
+    
     ax_cpu.set_xlabel("Time (s)")
-    ax_cpu.set_ylabel("Per-core CPU %")
-    ax_workers.set_ylabel("Workers used")
+    ax_cpu.set_ylabel("Avg CPU (%)")
+    ax_workers.set_ylabel("Workers Used")
+    
     ax_cpu.set_ylim(0, 105)
-    ax_cpu.grid(True, linestyle="--", alpha=0.6)
+    ax_cpu.grid(True, linestyle=":", alpha=0.7)
 
+    # --- UPDATED LEGEND LOGIC ---
+    # Combines the legends and places them above the plot horizontally
     cpu_lines, cpu_labels = ax_cpu.get_legend_handles_labels()
     worker_lines, worker_labels = ax_workers.get_legend_handles_labels()
-    ax_cpu.legend(cpu_lines + worker_lines, cpu_labels + worker_labels, loc="upper left", fontsize=8)
+    
+    ax_cpu.legend(
+        cpu_lines + worker_lines, 
+        cpu_labels + worker_labels, 
+        loc="lower center",           # Anchor point of the legend box
+        bbox_to_anchor=(0.5, 1.02),   # Push it perfectly above the top axis line
+        ncol=2,                       # Make it a horizontal 2-column layout
+        frameon=False                 # Keep the clean, frameless look
+    )
 
     fig.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    
+    # Save as PDF for vector rendering
+    pdf_output = output_path.with_suffix('.pdf')
+    fig.savefig(pdf_output, format='pdf', dpi=300, bbox_inches="tight")
+    
+    # Save as PNG for quick local viewing
+    png_output = output_path.with_suffix('.png')
+    fig.savefig(png_output, format='png', dpi=300, bbox_inches="tight")
+    
     plt.close(fig)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Plot CPU utilization and Vegeta worker growth for one run.")
+    parser = argparse.ArgumentParser(description="Plot Average CPU utilization and Vegeta worker growth.")
     parser.add_argument("--experiments-dir", type=Path, default=Path("phase-smooth-data/experiments_phase_queued_sut"))
     parser.add_argument("--rps", type=int, default=15000)
     parser.add_argument("--run", type=int, default=1)
@@ -68,19 +97,17 @@ if __name__ == "__main__":
     parser.add_argument("--cpu-set", type=str, required=True, help="CPU set label to include in plot title")
     args = parser.parse_args()
 
-    # loading the CSV files
     run_dir = args.experiments_dir / f"rps_{args.rps}_{args.cpu_set}" / f"run_{args.run}"
     cpu_csv = run_dir / "cpu_utilization.csv"
     workers_csv = run_dir / "workers_timeline.csv"
 
-    # loading the dataframes
     cpu_df = load_cpu(cpu_csv)
     workers_df = load_workers(workers_csv)
 
-    print(cpu_df.head())
-    print(workers_df.head())
-
-    # plotting the data
-    output = args.output or Path("results") / f"rps_{args.rps}_{args.cpu_set}" / f"run_{args.run}_cpu_workers.png"
+    # Base output path (extensions handled inside the function)
+    output = args.output or Path("results") / f"rps_{args.rps}_{args.cpu_set}" / f"run_{args.run}_cpu_workers"
+    
     plot_cpu_and_workers(cpu_df, workers_df, output, args.rps, args.run)
-    print(f"wrote plot: {output}")
+    
+    print(f"Wrote plot: {output.with_suffix('.pdf')}")
+    print(f"Wrote plot: {output.with_suffix('.png')}")
