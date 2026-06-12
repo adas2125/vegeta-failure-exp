@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -166,17 +168,14 @@ func (s phaseSchedule) String() string {
 	return strings.Join(parts, ";")
 }
 
-// hash functions, also used in python script for offline creation of the GT
+// hashUnit must match experiment/phase_generate_queued_sut_cdf.py exactly.
 func hashUnit(id, seed uint64) float64 {
-	x := splitmix64(id ^ (seed + 0x9e3779b97f4a7c15))
+	var payload [16]byte
+	binary.BigEndian.PutUint64(payload[:8], seed)
+	binary.BigEndian.PutUint64(payload[8:], id)
+	digest := sha256.Sum256(payload[:])
+	x := binary.BigEndian.Uint64(digest[:8])
 	return float64(x>>11) / float64(uint64(1)<<53)
-}
-
-func splitmix64(x uint64) uint64 {
-	x += 0x9e3779b97f4a7c15
-	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
-	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
-	return x ^ (x >> 31)
 }
 
 func main() {
