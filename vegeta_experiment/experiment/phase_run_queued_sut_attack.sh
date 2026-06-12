@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RPS="${RPS:-5000}"
 RATE="${RATE:-${RPS}/s}"
 DURATION="${DURATION:-30s}"
@@ -9,7 +9,7 @@ TIMEOUT="${TIMEOUT:-60s}"
 NAME="${NAME:-phase-queued-sut-${RATE}-${DURATION}}"
 HIST_BUCKETS="${HIST_BUCKETS:-[0,5ms,10ms,15ms,25ms,50ms,100ms,200ms,300ms,350ms,400ms,450ms,500ms,750ms,1s,2s,5s,10s,30s]}"
 VEGETA_CPUSET="${VEGETA_CPUSET:-0-7}"
-RUN_IDS="${RUN_IDS:-1 2 3 4 5}"
+RUN_IDS="${RUN_IDS:-1 2 3 4 5 6 7 8 9 10}"
 TARGET_HOST="${TARGET_HOST:-130.127.133.121}"
 BASE_PORT="${BASE_PORT:-8079}"
 EXPERIMENTS_DIR="${EXPERIMENTS_DIR:-experiments_phase_queued_sut}"
@@ -18,7 +18,7 @@ START_ID="${START_ID:-0}"
 cd "$ROOT_DIR"
 # running with taskset to bind vegeta to specific CPU cores (reproducibility and performance isolation)
 VEGETA_CMD=(taskset -c "$VEGETA_CPUSET" "$ROOT_DIR/vegeta")
-TARGET_WRITER="$ROOT_DIR/scripts/experiment/utils/write_targets.py"
+TARGET_WRITER="$ROOT_DIR/experiment/utils/write_targets.py"
 
 # each run directed to a different port to avoid conflicts
 for RUN_ID in $RUN_IDS; do
