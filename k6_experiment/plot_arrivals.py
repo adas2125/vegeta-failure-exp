@@ -1,73 +1,132 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-import os
+from pathlib import Path
 
-EXP_DIR = "cpu_0_7"
-RESULTS_DIR = "results"
+# globals for the directories
+ARRIVALS_DIR = Path("sut_arrivals")
+LIMITED_EXP_DIR = ARRIVALS_DIR / "cpu_0_7"
+FULL_EXP_DIR = ARRIVALS_DIR / "cpu_0_55"
+RESULTS_DIR = Path("paper_figures")
+DURATION_SECONDS = 60
 
-def plot_all_arrivals(num_runs=5):
-    # Set up the figure and subplots ONCE before the loop
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-    
-    # Set the overarching title to the experiment directory name
-    fig.suptitle(EXP_DIR, fontsize=16, fontweight='bold')
+def get_avg_rates(exp_dir, num_runs=10):
+    """Helper function to extract and average the arrival rates for a given experiment directory."""
+    all_rates = []
 
+    # going from e.g. arrivals_1/arrivals.csv to arrivals_10/arrivals.csv
     for run_id in range(1, num_runs + 1):
-        csv_filename = f"{EXP_DIR}/arrivals_{run_id}/arrivals.csv"
-        print(f"Processing Run {run_id}...")
-        
-        try:
-            # Read the CSV and parse precise timestamps
-            df = pd.read_csv(csv_filename)
-        except FileNotFoundError:
-            print(f"  -> File {csv_filename} not found. Skipping.")
-            continue
+        csv_filename = exp_dir / f"arrivals_{run_id}" / "arrivals.csv"
+        df = pd.read_csv(csv_filename)
 
+        # print(df.head())  # Debug: print the first few rows to verify the structure
+
+        # converting Timestamp to datetime and sorting just in case
         df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-
-        # Sort to guarantee chronological order
         df = df.sort_values('Timestamp')
 
-        # Use relative seconds on the x-axis, where 0 is the first observed second
-        start_second = df['Timestamp'].min().floor('s')
-        df['Relative_Seconds'] = (df['Timestamp'] - start_second).dt.total_seconds()
+        # print(df.head())  # Debug: print the first few rows after processing
 
-        # Calculate Cumulative Arrivals based on row sequence
-        df['Cumulative_Arrivals'] = range(1, len(df) + 1)
+        # Baseline to the first observed second
+        start_second = df['Timestamp'].min().floor('s')
+
+        # print(f"Run {run_id}: Start time baseline set to {start_second}")  # Debug: print the baseline time
 
         # Calculate Arrival Rate over 1-second intervals
         df_rate = df.set_index('Timestamp').resample('1s').size().reset_index(name='Arrivals_Per_Second')
         df_rate['Relative_Seconds'] = (df_rate['Timestamp'] - start_second).dt.total_seconds()
+        
+        # has the columns. relative_seconds and arrivals_per_second
+        all_rates.append(df_rate[['Relative_Seconds', 'Arrivals_Per_Second']])
 
-        # --- Top Panel: Cumulative Arrivals ---
-        # Note: 'color' is removed so matplotlib automatically cycles through colors
-        ax1.plot(df['Relative_Seconds'], df['Cumulative_Arrivals'], linewidth=2, label=f'Run {run_id}')
+    # Combine all runs and calculate the average rate per relative second
+    combined_rates = pd.concat(all_rates)
 
-        # --- Bottom Panel: Arrival Rate (Arrivals per Second) ---
-        ax2.plot(df_rate['Relative_Seconds'], df_rate['Arrivals_Per_Second'], linewidth=2, label=f'Run {run_id}')
+    # for each relative second, calculate the average arrival rate across all runs
+    avg_rates = combined_rates.groupby('Relative_Seconds')['Arrivals_Per_Second'].mean().reset_index()
 
-    # --- Formatting Top Panel ---
-    ax1.set_title('Request Arrivals Over Time')
-    ax1.set_ylabel('Total Arrivals')
-    ax1.grid(True, linestyle='--', alpha=0.7)
-    ax1.legend(loc="upper left")
+    # print(avg_rates.head())  # Debug: print the first few rows of the average rates
 
-    # --- Formatting Bottom Panel ---
-    ax2.set_title('Arrival Rate')
-    ax2.set_xlabel('Relative Time (s)')
-    ax2.set_ylabel('Arrivals per Second')
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    ax2.legend(loc="upper left")
+    return avg_rates
 
-    # Adjust layout so labels don't overlap with the suptitle
-    plt.tight_layout()
+def plot_aggregate_rate(num_runs=10, start_time=0, end_time=DURATION_SECONDS):
+    """Generated using Gemini for plotting"""
 
-    # Save and display the plot
-    output_filename = f"{RESULTS_DIR}/{EXP_DIR}_arrivals_plot.png"
-    plt.savefig(output_filename, dpi=300)
-    print(f"\nPlot saved as {output_filename}")
+    # ACM Paper Styling Requirements
+    plt.rcParams.update({
+        'font.size': 10,
+        'axes.labelsize': 10,
+        'xtick.labelsize': 9,
+        'ytick.labelsize': 9,
+        'legend.fontsize': 9,
+        'font.family': 'serif',
+        'pdf.fonttype': 42, # Forces Type 1 fonts
+        'ps.fonttype': 42
+    })
+
+    # Single plot, adjusted height for one panel
+    fig, ax = plt.subplots(figsize=(3.33, 2.5), layout="constrained")
+
+    print("Processing Limited Run Data...")
+    df_limited = get_avg_rates(LIMITED_EXP_DIR, num_runs)
     
-    plt.show()
+    print("Processing Full Run Data...")
+    df_full = get_avg_rates(FULL_EXP_DIR, num_runs)
+
+    # Plot Full Run - Rate (req/s) within the trimmed window
+    df_full_trimmed = df_full[(df_full['Relative_Seconds'] >= start_time) & (df_full['Relative_Seconds'] <= end_time)]
+    ax.step(
+        df_full_trimmed['Relative_Seconds'], 
+        df_full_trimmed['Arrivals_Per_Second'], 
+        where="post",
+        linewidth=2.0, # Thicker line for print visibility
+        linestyle='-', # Solid line
+        color="#1f77b4", # Standard matplotlib blue
+        label='Full (56 cores)'
+    )
+
+    # Plot Limited Run - Rate (req/s) within the trimmed window
+    df_limited_trimmed = df_limited[(df_limited['Relative_Seconds'] >= start_time) & (df_limited['Relative_Seconds'] <= end_time)]
+    ax.step(
+        df_limited_trimmed['Relative_Seconds'], 
+        df_limited_trimmed['Arrivals_Per_Second'], 
+        where="post",
+        linewidth=2.0, # Thicker line for print visibility
+        linestyle='--', # Dashed line guarantees contrast in black-and-white print
+        color="#d62728", # Contrasting red
+        label='Limited (8 cores)'
+    )
+
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Rate (req/s)')
+    ax.grid(True, linestyle=':', alpha=0.7)
+    
+    # Dynamically bound the X-axis to the trimmed window
+    ax.set_xlim(start_time, end_time)
+    ax.set_ylim(bottom=0)
+    
+    # Place legend up top, outside the plot bounds
+    ax.legend(
+        loc="upper center", 
+        bbox_to_anchor=(0.5, 1.15), # Anchors legend slightly above the figure
+        ncol=2, # Places labels side-by-side
+        frameon=False
+    )
+
+    # create results directory if it doesn't exist
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_base = RESULTS_DIR / f"comparison_rate_avg_{start_time}_to_{end_time}"
+
+    # Save outputs
+    pdf_output = output_base.with_suffix('.pdf')
+    fig.savefig(pdf_output, format='pdf', dpi=300, bbox_inches='tight')
+    
+    png_output = output_base.with_suffix('.png')
+    fig.savefig(png_output, format='png', dpi=300, bbox_inches='tight')
+
+    print(f"\nPlots saved successfully to {RESULTS_DIR}/ as {output_base.name}.pdf/.png")
+    
+    plt.close(fig)
 
 if __name__ == "__main__":
-    plot_all_arrivals(5)
+    # plotting the aggregate rates across 10 runs, trimming the startup period
+    plot_aggregate_rate(num_runs=10, start_time=0, end_time=50)
