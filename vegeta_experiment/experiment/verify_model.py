@@ -1,0 +1,287 @@
+"""
+The purpose of this script is to verify that the heap-based GT model matches the
+SUT's observed queueing behavior when both are given the same SUT arrival times.
+
+The script decodes SUT-side response metrics from results.csv, replays requests
+through a concurrency-sized heap using only arrived_at and assigned_delay_ms,
+compares the model against Vegeta latency_ns, and writes debug plots using
+hdrplot.tsv percentiles.
+"""
+
+import argparse
+import base64
+import csv
+import heapq
+import json
+import math
+import sys
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
+import matplotlib.pyplot as plt
+
+# From vegeta's lib/results.go
+CSV_COLUMNS = [
+    "timestamp_ns",
+    "status",
+    "latency_ns",
+    "bytes_out",
+    "bytes_in",
+    "error",
+    "body",
+    "attack",
+    "seq",
+    "method",
+    "url",
+    "headers",
+]
+
+# how to report the percentiles
+SUMMARY_PERCENTILES = [0.50, 0.90, 0.95, 0.99, 0.999, 0.9999]
+HDR_VALUE_COLUMN = "Value(ms)"
+HDR_PERCENTILE_COLUMN = "Percentile"
+HDR_INV_PERCENTILE_COLUMN = "1/(1-Percentile)"
+CONCURRENCY_BY_RPS = {
+    5000: 2000,
+    12000: 4800,
+    15000: 6000,
+}
+
+def parse_sut_time_ms(value):
+    """Parses the SUT's time string into a timestamp in milliseconds."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000.0
+
+def load_sut_rows(results_csv):
+    """Loads and decodes the SUT response rows from results.csv, returning a list of dicts with relevant metrics."""
+    rows = []
+    # opening the results.csv file
+    with results_csv.open(newline="") as f:
+        for rec in csv.reader(f):
+
+            # couple of sanity checks to catch unexpected format issues early
+            assert len(rec) == len(CSV_COLUMNS), f"expected {len(CSV_COLUMNS)} columns, got {len(rec)} in row: {rec}"
+            assert rec[1] == "200", f"expected status 200, got {rec[1]}"
+
+            # decoding the body column which contains the SUT's response metrics as a base64-encoded JSON string
+            body = json.loads(base64.b64decode(rec[6]))
+            rows.append(
+                {
+                    "request_id": int(body["request_id"]),
+                    "seq": int(rec[8]),
+                    "assigned_delay_ms": float(body["assigned_delay_ms"]),
+                    "arrived_at_ms": parse_sut_time_ms(body["arrived_at"]),
+                    "queue_wait_ms": float(body["queue_wait_ms"]),
+                    "vegeta_latency_ms": float(rec[2]) / 1_000_000.0,
+                }
+            )
+    return rows
+
+
+def simulate_model_from_sut_arrivals(rows, concurrency):
+    """
+    Simulates the heap-based GT model using the SUT's actual arrival times and assigned delays, 
+    returning a list of dicts with request_id, vegeta_latency, nominal_latency, and predicted_latency.
+    """
+    
+    assert rows, "expected at least one successful SUT response row"
+    assert concurrency > 0, f"concurrency must be positive, got {concurrency}"
+
+    # sort the rows by arrival time at the SUT, then request id, then seq
+    rows = sorted(rows, key=lambda row: (row["arrived_at_ms"], row["request_id"], row["seq"]))
+    # obtaining the arrival time of the first request
+    first_arrival_ms = rows[0]["arrived_at_ms"]
+
+    # allocate the concurrency for this RPS level
+    workers = [0.0] * concurrency
+    heapq.heapify(workers)
+
+    samples = []
+    for row in rows:
+        # wall-clock time when the request arrived at the SUT, relative to the first arrival, in milliseconds
+        arrival_ms = row["arrived_at_ms"] - first_arrival_ms
+
+        # getting the assigned service (verify_assigned_delay.py confirms the match)
+        service_ms = row["assigned_delay_ms"]
+
+        # replicating the GT model's heap behavior to compute the predicted finish time for this request
+        earliest_available_ms = heapq.heappop(workers)
+        start_ms = max(arrival_ms, earliest_available_ms)
+        finish_ms = start_ms + service_ms
+        heapq.heappush(workers, finish_ms)
+
+        # the predicted latency at the SUT for this request
+        predicted_latency_ms = finish_ms - arrival_ms
+
+        # nominal latency captured from SUT metrics; excludes Go scheduler/Vegeta overhead
+        nominal_latency_ms = row["queue_wait_ms"] + service_ms
+
+        # record the sample for this request
+        samples.append(
+            {
+                "request_id": row["request_id"],
+                "vegeta_latency_ms": row["vegeta_latency_ms"],
+                "nominal_latency_ms": nominal_latency_ms,
+                "predicted_latency_ms": predicted_latency_ms,
+            }
+        )
+
+    return samples
+
+
+def percentile(sorted_values, pct):
+    """Simple percentile calculation."""
+    idx = math.ceil(pct * len(sorted_values)) - 1
+    idx = max(0, min(idx, len(sorted_values) - 1))
+    return sorted_values[idx]
+
+
+def load_hdrplot_points(hdrplot_tsv):
+    """
+    Loads all the points (percentile, latency_ms, 1/(1-p)) 
+    from the hdrplot.tsv file generated by Vegeta.
+    """
+    points = []
+    with hdrplot_tsv.open() as f:
+        header = f.readline().split()
+        for line in f:
+            if not line.strip():
+                continue
+            row = dict(zip(header, line.split()))
+            # (percentile, latency_ms, 1/(1-p))
+            points.append(
+                (
+                    float(row[HDR_PERCENTILE_COLUMN]),
+                    float(row[HDR_VALUE_COLUMN]),
+                    float(row[HDR_INV_PERCENTILE_COLUMN]),
+                )
+            )
+    # sort based on percentile
+    points.sort(key=lambda point: point[0])
+    return points
+
+
+def percentile_curve(sorted_values, percentiles):
+    """Returns the latency values corresponding to the given percentiles for the sorted input values."""
+    return [percentile(sorted_values, pct) for pct in percentiles]
+
+
+def format_latency_axis(ax):
+    """Formats the latency axis with a log scale"""
+    ax.set_xscale("log")
+    ax.set_xlim(left=1)
+    ax.set_ylim(bottom=0)
+    ax.grid(True, alpha=0.35)
+    ax.legend(loc="best")
+    ax.set_xticks([1, 10, 100, 1_000, 10_000, 100_000, 1_000_000])
+    ax.set_xticklabels(["0%", "90%", "99%", "99.9%", "99.99%", "99.999%", "99.9999%"])
+
+def print_percentile_table(samples):
+    """Prints a table of the specified percentiles for the latency measurements"""
+    vegeta_latencies = sorted(row["vegeta_latency_ms"] for row in samples)
+    nominal_latencies = sorted(row["nominal_latency_ms"] for row in samples)
+    predicted_latencies = sorted(row["predicted_latency_ms"] for row in samples)
+
+    print(f"{'pct':>8} {'vegeta':>12} {'nominal':>12} {'model':>12} {'vegeta-model':>14} {'nominal-model':>15}")
+    for pct in SUMMARY_PERCENTILES:
+        vegeta = percentile(vegeta_latencies, pct)
+        nominal = percentile(nominal_latencies, pct)
+        model = percentile(predicted_latencies, pct)
+        print(
+            f"p{pct * 100:<7g} "
+            f"{vegeta:12.3f} "
+            f"{nominal:12.3f} "
+            f"{model:12.3f} "
+            f"{vegeta - model:14.3f} "
+            f"{nominal - model:15.3f}"
+        )
+
+    vegeta_mean = sum(vegeta_latencies) / len(vegeta_latencies)
+    nominal_mean = sum(nominal_latencies) / len(nominal_latencies)
+    model_mean = sum(predicted_latencies) / len(predicted_latencies)
+    print(
+        f"mean     "
+        f"{vegeta_mean:12.3f} "
+        f"{nominal_mean:12.3f} "
+        f"{model_mean:12.3f} "
+        f"{vegeta_mean - model_mean:14.3f} "
+        f"{nominal_mean - model_mean:15.3f}"
+    )
+
+
+def write_latency_plot(samples, hdrplot_tsv, output_path, title):
+    """
+    Generates a latency percentile plot comparing the Vegeta latencies 
+    and the model's predicted latencies, using the percentiles from 
+    the hdrplot.tsv for the x-axis.
+    """
+
+    # loading percentiles and 1/(1-p) from the hdrplot.tsv generated by the SUT for this run
+    hdr_points = load_hdrplot_points(hdrplot_tsv)
+    percentiles = [pct for pct, _, _ in hdr_points]
+    x = [one_by for _, _, one_by in hdr_points]
+
+    # obtaining the observed latencies and predicted latencies for this run, sorted in ascending order for percentile calculations
+    observed_latencies = sorted(row["vegeta_latency_ms"] for row in samples)
+    predicted_latencies = sorted(row["predicted_latency_ms"] for row in samples)
+
+    # plotting the percentile curves from observed latencies and predicted latencies
+    fig, ax = plt.subplots(figsize=(11, 6))
+    ax.plot(x, percentile_curve(observed_latencies, percentiles), linewidth=2.0, label="Vegeta latency")
+    ax.plot(x, percentile_curve(predicted_latencies, percentiles), linewidth=2.2, linestyle="--", label="Observed-arrival model")
+    ax.set_title(title)
+    ax.set_ylabel("Latency (ms)")
+    ax.set_xlabel("Percentile")
+    format_latency_axis(ax)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
+    fig.savefig(output_path, dpi=300)
+    plt.close(fig)
+
+
+def verify_results_file(results_file, concurrency, output_dir, exp_name, run_name):
+    rows = load_sut_rows(results_file)
+
+    samples = simulate_model_from_sut_arrivals(rows, concurrency)
+    print(f"\n[INFO] {results_file}")
+    print(f"rows={len(rows)} concurrency={concurrency}")
+    print_percentile_table(samples)
+
+    # writing the latency plot with hdr
+    hdrplot_tsv = results_file.with_name("hdrplot.tsv")
+    assert hdrplot_tsv.exists(), f"missing hdrplot.tsv next to {results_file}"
+
+    # creating the debug output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{exp_name}_{run_name}_latency.png"
+    write_latency_plot(
+        samples,
+        hdrplot_tsv,
+        output_path,
+        f"Observed-Arrival Model vs Vegeta Latency - {exp_name} {run_name}",
+    )
+    print(f"[INFO] wrote plot: {output_path}")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        description="Verify observed-arrival heap model latency against SUT response metrics."
+    )
+    parser.add_argument("--input-dir", type=Path, default=Path("experiments_phase_queued_sut"), help="directory containing rps_*/run_*/results.csv")
+    parser.add_argument("--output-dir", type=Path, default=Path("debug_plots"), help="directory for debug latency plots")
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    for exp_dir in sorted(args.input_dir.iterdir()):
+        rps = int(float(exp_dir.name.split("_")[1]))
+        # getting the SUT concurrency from the hard-coded mapping
+        concurrency = CONCURRENCY_BY_RPS[rps]
+        print(f"[INFO] Analyzing {exp_dir} with concurrency={concurrency}...")
+        # verifying the results for each individual run for this RPS-concurrency pair
+        for run_dir in sorted(exp_dir.iterdir()):
+            results_file = run_dir / "results.csv"
+            verify_results_file(results_file, concurrency, args.output_dir, exp_dir.name, run_dir.name)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
