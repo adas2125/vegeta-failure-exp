@@ -129,4 +129,4 @@ def plot_aggregate_rate(num_runs=10, start_time=0, end_time=DURATION_SECONDS):
 
 if __name__ == "__main__":
     # plotting the aggregate rates across 10 runs, trimming the startup period
-    plot_aggregate_rate(num_runs=10, start_time=0, end_time=50)
+    plot_aggregate_rate(num_runs=10, start_time=20, end_time=50)
