@@ -110,8 +110,10 @@ Run the following scripts to generate the full results and figures:
 # Plots and saves send rates over time
 python3 experiment/plot_send_rate.py --rps=5000 --runs=5 --cpu-set=0-7
 python3 experiment/plot_send_rate.py --rps=15000 --runs=5 --cpu-set=0-7
-python3 experiment/plot_send_rate.py --rps=12000 --runs=5 --cpu-set=0-7
-python3 experiment/plot_send_rate.py --rps=12000 --runs=5 --cpu-set=0-55
+
+# For the 12K runs in our paper, we have 10 runs
+python3 experiment/plot_send_rate.py --rps=12000 --runs=10 --cpu-set=0-7
+python3 experiment/plot_send_rate.py --rps=12000 --runs=10 --cpu-set=0-55
 
 # Plots and saves CPU utilization over time
 python3 display_cpu_util.py --rps=5000 --cpu-set=0-7
@@ -124,7 +126,17 @@ python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smoot
 
 python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smooth-data/experiments_phase_queued_sut/rps_15000_0-7/run_1/results.csv --rps=15000 --concurrency=6000 --duration=30 --runs=5 --cpu-set=0-7
 
-python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smooth-data/experiments_phase_queued_sut/rps_12000_0-7/run_1/results.csv --rps=12000 --concurrency=4800 --duration=30 --runs=5 --cpu-set=0-7
+# For the 12K runs in our paper, we have 10 runs
+python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smooth-data/experiments_phase_queued_sut/rps_12000_0-7/run_1/results.csv --rps=12000 --concurrency=4800 --duration=30 --runs=10 --cpu-set=0-7
 
-python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smooth-data/experiments_phase_queued_sut/rps_12000_0-55/run_1/results.csv --rps=12000 --concurrency=4800 --duration=30 --runs=5 --cpu-set=0-55
+python3 experiment/phase_compare_queued_sut_latency.py --results-csv=phase-smooth-data/experiments_phase_queued_sut/rps_12000_0-55/run_1/results.csv --rps=12000 --concurrency=4800 --duration=30 --runs=10 --cpu-set=0-55
+
+# For the 12K runs, to compare queueing delay
+python3 experiment/phase_compare_queued_sut_queue_delay.py --rps=12000
 ```
+
+#### Unit Test Scripts
+This repository includes 2 unit test scripts: `experiment/verify_assigned_delays.py` and `experiment/verify_model.py`.
+These scripts verify that the assignment of delays is the same between the offline GT simulation and
+the heap-based model for offline replay is similar to the actual runs.
+
