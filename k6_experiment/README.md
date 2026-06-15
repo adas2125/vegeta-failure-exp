@@ -84,7 +84,7 @@ This plot is useful for checking whether the limited-client run sends fewer requ
 
 ## Important Note: Adjusting the SUT Slow Phase
 
-Currently, `./run_phase_queued_server.sh` is hard-coded to make the SUT slow from **27s to 30s**.
+Currently, `./run_phase_queued_server.sh` is hard-coded to make the SUT slow from **29s to 31s**.
 
 Depending on the arrival-rate plot at the SUT, this slow phase may need to be changed to better demonstrate coordinated omission.
 
